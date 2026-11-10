@@ -11,22 +11,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// +build !nobcache
+//go:build !nobcache
 
 package collector
 
 import (
 	"fmt"
+	"log/slog"
 
-	"github.com/go-kit/log"
+	"github.com/alecthomas/kingpin/v2"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/procfs/bcache"
-	"gopkg.in/alecthomas/kingpin.v2"
 )
 
-var (
-	priorityStats = kingpin.Flag("collector.bcache.priorityStats", "Expose expensive priority stats.").Bool()
-)
+var priorityStats = kingpin.Flag("collector.bcache.priorityStats", "Expose expensive priority stats.").Bool()
 
 func init() {
 	registerCollector("bcache", defaultEnabled, NewBcacheCollector)
@@ -35,12 +33,12 @@ func init() {
 // A bcacheCollector is a Collector which gathers metrics from Linux bcache.
 type bcacheCollector struct {
 	fs     bcache.FS
-	logger log.Logger
+	logger *slog.Logger
 }
 
 // NewBcacheCollector returns a newly allocated bcacheCollector.
 // It exposes a number of Linux bcache statistics.
-func NewBcacheCollector(logger log.Logger) (Collector, error) {
+func NewBcacheCollector(logger *slog.Logger) (Collector, error) {
 	fs, err := bcache.NewFS(*sysPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open sysfs: %w", err)
@@ -133,21 +131,25 @@ func bcachePeriodStatsToMetric(ps *bcache.PeriodStats, labelValue string) []bcac
 			extraLabel:      label,
 			extraLabelValue: labelValue,
 		},
-		{
-			name:            "cache_readaheads_total",
-			desc:            "Count of times readahead occurred.",
-			value:           float64(ps.CacheReadaheads),
-			metricType:      prometheus.CounterValue,
-			extraLabel:      label,
-			extraLabelValue: labelValue,
-		},
+	}
+	if ps.CacheReadaheads != 0 {
+		bcacheReadaheadMetrics := []bcacheMetric{
+			{
+				name:            "cache_readaheads_total",
+				desc:            "Count of times readahead occurred.",
+				value:           float64(ps.CacheReadaheads),
+				metricType:      prometheus.CounterValue,
+				extraLabel:      label,
+				extraLabelValue: labelValue,
+			},
+		}
+		metrics = append(metrics, bcacheReadaheadMetrics...)
 	}
 	return metrics
 }
 
 // UpdateBcacheStats collects statistics for one bcache ID.
 func (c *bcacheCollector) updateBcacheStats(ch chan<- prometheus.Metric, s *bcache.Stats) {
-
 	const (
 		subsystem = "bcache"
 	)
@@ -212,7 +214,7 @@ func (c *bcacheCollector) updateBcacheStats(ch chan<- prometheus.Metric, s *bcac
 		{
 			name:       "btree_read_average_duration_seconds",
 			desc:       "Average btree read duration.",
-			value:      float64(s.Bcache.Internal.BtreeReadAverageDurationNanoSeconds) * 1e-9,
+			value:      float64(s.Bcache.Internal.BtreeReadAverageDurationMicroSeconds) * 1e-6,
 			metricType: prometheus.GaugeValue,
 		},
 		{

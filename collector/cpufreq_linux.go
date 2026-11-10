@@ -11,27 +11,23 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// +build !nocpu
+//go:build !nocpu
 
 package collector
 
 import (
 	"fmt"
+	"log/slog"
+	"strings"
 
-	"github.com/go-kit/log"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/procfs/sysfs"
 )
 
 type cpuFreqCollector struct {
-	fs             sysfs.FS
-	cpuFreq        *prometheus.Desc
-	cpuFreqMin     *prometheus.Desc
-	cpuFreqMax     *prometheus.Desc
-	scalingFreq    *prometheus.Desc
-	scalingFreqMin *prometheus.Desc
-	scalingFreqMax *prometheus.Desc
-	logger         log.Logger
+	fs     sysfs.FS
+	descs  cpuFreqDescs
+	logger *slog.Logger
 }
 
 func init() {
@@ -39,44 +35,15 @@ func init() {
 }
 
 // NewCPUFreqCollector returns a new Collector exposing kernel/system statistics.
-func NewCPUFreqCollector(logger log.Logger) (Collector, error) {
+func NewCPUFreqCollector(logger *slog.Logger) (Collector, error) {
 	fs, err := sysfs.NewFS(*sysPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open sysfs: %w", err)
 	}
 
 	return &cpuFreqCollector{
-		fs: fs,
-		cpuFreq: prometheus.NewDesc(
-			prometheus.BuildFQName(namespace, cpuCollectorSubsystem, "frequency_hertz"),
-			"Current cpu thread frequency in hertz.",
-			[]string{"cpu"}, nil,
-		),
-		cpuFreqMin: prometheus.NewDesc(
-			prometheus.BuildFQName(namespace, cpuCollectorSubsystem, "frequency_min_hertz"),
-			"Minimum cpu thread frequency in hertz.",
-			[]string{"cpu"}, nil,
-		),
-		cpuFreqMax: prometheus.NewDesc(
-			prometheus.BuildFQName(namespace, cpuCollectorSubsystem, "frequency_max_hertz"),
-			"Maximum cpu thread frequency in hertz.",
-			[]string{"cpu"}, nil,
-		),
-		scalingFreq: prometheus.NewDesc(
-			prometheus.BuildFQName(namespace, cpuCollectorSubsystem, "scaling_frequency_hertz"),
-			"Current scaled CPU thread frequency in hertz.",
-			[]string{"cpu"}, nil,
-		),
-		scalingFreqMin: prometheus.NewDesc(
-			prometheus.BuildFQName(namespace, cpuCollectorSubsystem, "scaling_frequency_min_hertz"),
-			"Minimum scaled CPU thread frequency in hertz.",
-			[]string{"cpu"}, nil,
-		),
-		scalingFreqMax: prometheus.NewDesc(
-			prometheus.BuildFQName(namespace, cpuCollectorSubsystem, "scaling_frequency_max_hertz"),
-			"Maximum scaled CPU thread frequency in hertz.",
-			[]string{"cpu"}, nil,
-		),
+		fs:     fs,
+		descs:  newCPUFreqDescs(),
 		logger: logger,
 	}, nil
 }
@@ -93,15 +60,23 @@ func (c *cpuFreqCollector) Update(ch chan<- prometheus.Metric) error {
 	for _, stats := range cpuFreqs {
 		if stats.CpuinfoCurrentFrequency != nil {
 			ch <- prometheus.MustNewConstMetric(
-				c.cpuFreq,
+				c.descs.hertz,
 				prometheus.GaugeValue,
 				float64(*stats.CpuinfoCurrentFrequency)*1000.0,
 				stats.Name,
 			)
 		}
+		if stats.CpuinfoAverageFrequency != nil {
+			ch <- prometheus.MustNewConstMetric(
+				c.descs.avgHertz,
+				prometheus.GaugeValue,
+				float64(*stats.CpuinfoAverageFrequency)*1000.0,
+				stats.Name,
+			)
+		}
 		if stats.CpuinfoMinimumFrequency != nil {
 			ch <- prometheus.MustNewConstMetric(
-				c.cpuFreqMin,
+				c.descs.minHertz,
 				prometheus.GaugeValue,
 				float64(*stats.CpuinfoMinimumFrequency)*1000.0,
 				stats.Name,
@@ -109,7 +84,7 @@ func (c *cpuFreqCollector) Update(ch chan<- prometheus.Metric) error {
 		}
 		if stats.CpuinfoMaximumFrequency != nil {
 			ch <- prometheus.MustNewConstMetric(
-				c.cpuFreqMax,
+				c.descs.maxHertz,
 				prometheus.GaugeValue,
 				float64(*stats.CpuinfoMaximumFrequency)*1000.0,
 				stats.Name,
@@ -117,7 +92,7 @@ func (c *cpuFreqCollector) Update(ch chan<- prometheus.Metric) error {
 		}
 		if stats.ScalingCurrentFrequency != nil {
 			ch <- prometheus.MustNewConstMetric(
-				c.scalingFreq,
+				c.descs.scalingHertz,
 				prometheus.GaugeValue,
 				float64(*stats.ScalingCurrentFrequency)*1000.0,
 				stats.Name,
@@ -125,7 +100,7 @@ func (c *cpuFreqCollector) Update(ch chan<- prometheus.Metric) error {
 		}
 		if stats.ScalingMinimumFrequency != nil {
 			ch <- prometheus.MustNewConstMetric(
-				c.scalingFreqMin,
+				c.descs.scalingMinHertz,
 				prometheus.GaugeValue,
 				float64(*stats.ScalingMinimumFrequency)*1000.0,
 				stats.Name,
@@ -133,11 +108,27 @@ func (c *cpuFreqCollector) Update(ch chan<- prometheus.Metric) error {
 		}
 		if stats.ScalingMaximumFrequency != nil {
 			ch <- prometheus.MustNewConstMetric(
-				c.scalingFreqMax,
+				c.descs.scalingMaxHertz,
 				prometheus.GaugeValue,
 				float64(*stats.ScalingMaximumFrequency)*1000.0,
 				stats.Name,
 			)
+		}
+		if stats.Governor != "" {
+			availableGovernors := strings.SplitSeq(stats.AvailableGovernors, " ")
+			for g := range availableGovernors {
+				state := 0
+				if g == stats.Governor {
+					state = 1
+				}
+				ch <- prometheus.MustNewConstMetric(
+					c.descs.scalingGovernor,
+					prometheus.GaugeValue,
+					float64(state),
+					stats.Name,
+					g,
+				)
+			}
 		}
 	}
 	return nil

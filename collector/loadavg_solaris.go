@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// +build !noloadavg
+//go:build !noloadavg
 
 package collector
 
@@ -27,14 +27,12 @@ import "C"
 
 func kstatToFloat(ks *kstat.KStat, kstatKey string) float64 {
 	kstatValue, err := ks.GetNamed(kstatKey)
-
 	if err != nil {
 		panic(err)
 	}
 
 	kstatLoadavg, err := strconv.ParseFloat(
 		fmt.Sprintf("%.2f", float64(kstatValue.UintVal)/C.FSCALE), 64)
-
 	if err != nil {
 		panic(err)
 	}
@@ -51,7 +49,6 @@ func getLoad() ([]float64, error) {
 	defer tok.Close()
 
 	ks, err := tok.Lookup("unix", 0, "system_misc")
-
 	if err != nil {
 		panic(err)
 	}

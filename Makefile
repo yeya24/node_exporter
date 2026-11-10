@@ -14,14 +14,12 @@
 # Ensure that 'all' is the default target otherwise it will be the first target from Makefile.common.
 all::
 
-# Needs to be defined before including Makefile.common to auto-generate targets
-DOCKER_ARCHS ?= amd64 armv7 arm64 ppc64le s390x
-
 include Makefile.common
 
-PROMTOOL_VERSION ?= 2.30.0
+PROMTOOL_VERSION ?= 3.15.0
 PROMTOOL_URL     ?= https://github.com/prometheus/prometheus/releases/download/v$(PROMTOOL_VERSION)/prometheus-$(PROMTOOL_VERSION).$(GO_BUILD_PLATFORM).tar.gz
 PROMTOOL         ?= $(FIRST_GOPATH)/bin/promtool
+E2E_EXTRA_FLAGS  ?=
 
 DOCKER_IMAGE_NAME       ?= node-exporter
 MACH                    ?= $(shell uname -m)
@@ -60,12 +58,13 @@ endif
 
 PROMU := $(FIRST_GOPATH)/bin/promu --config $(PROMU_CONF)
 
+e2e-out-64k-page = collector/fixtures/e2e-64k-page-output.txt
 e2e-out = collector/fixtures/e2e-output.txt
 ifeq ($(MACH), ppc64le)
-	e2e-out = collector/fixtures/e2e-64k-page-output.txt
+	e2e-out = $(e2e-out-64k-page)
 endif
 ifeq ($(MACH), aarch64)
-	e2e-out = collector/fixtures/e2e-64k-page-output.txt
+	e2e-out = $(e2e-out-64k-page)
 endif
 
 # 64bit -> 32bit mapping for cross-checking. At least for amd64/386, the 64bit CPU can execute 32bit code but not the other way around, so we don't support cross-testing upwards.
@@ -87,14 +86,14 @@ $(eval $(call goarch_pair,mips64el,mipsel))
 all:: vet checkmetrics checkrules common-all $(cross-test) $(test-e2e)
 
 .PHONY: test
-test: collector/fixtures/sys/.unpacked
+test: collector/fixtures/sys/.unpacked collector/fixtures/udev/.unpacked
 	@echo ">> running tests"
 	$(GO) test -short $(test-flags) $(pkgs)
 
 .PHONY: test-32bit
-test-32bit: collector/fixtures/sys/.unpacked
+test-32bit: collector/fixtures/sys/.unpacked collector/fixtures/udev/.unpacked
 	@echo ">> running tests in 32-bit mode"
-	@env GOARCH=$(GOARCH_CROSS) $(GO) test $(pkgs)
+	@env GOARCH=$(GOARCH_CROSS) $(GO) test -tags noethtool $(pkgs)
 
 .PHONY: skip-test-32bit
 skip-test-32bit:
@@ -109,11 +108,18 @@ skip-test-32bit:
 update_fixtures:
 	rm -vf collector/fixtures/sys/.unpacked
 	./ttar -C collector/fixtures -c -f collector/fixtures/sys.ttar sys
+	rm -vf collector/fixtures/udev/.unpacked
+	./ttar -C collector/fixtures -c -f collector/fixtures/udev.ttar udev
+
+.PHONY: tools
+tools:
+	@rm ./tools/tools >/dev/null 2>&1 || true
+	@$(GO) build -o tools ./tools/...
 
 .PHONY: test-e2e
-test-e2e: build collector/fixtures/sys/.unpacked
+test-e2e: build collector/fixtures/sys/.unpacked collector/fixtures/udev/.unpacked tools
 	@echo ">> running end-to-end tests"
-	./end-to-end-test.sh
+	./end-to-end-test.sh -e "$(E2E_EXTRA_FLAGS)"
 
 .PHONY: skip-test-e2e
 skip-test-e2e:
@@ -123,6 +129,7 @@ skip-test-e2e:
 checkmetrics: $(PROMTOOL)
 	@echo ">> checking metrics for correctness"
 	./checkmetrics.sh $(PROMTOOL) $(e2e-out)
+	./checkmetrics.sh $(PROMTOOL) $(e2e-out-64k-page)
 
 .PHONY: checkrules
 checkrules: $(PROMTOOL)

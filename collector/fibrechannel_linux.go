@@ -11,17 +11,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// +build linux
-// +build !nofibrechannel
+//go:build !nofibrechannel
 
 package collector
 
 import (
 	"fmt"
+	"log/slog"
 	"os"
 
-	"github.com/go-kit/log"
-	"github.com/go-kit/log/level"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/procfs/sysfs"
 )
@@ -31,7 +29,7 @@ const maxUint64 = ^uint64(0)
 type fibrechannelCollector struct {
 	fs          sysfs.FS
 	metricDescs map[string]*prometheus.Desc
-	logger      log.Logger
+	logger      *slog.Logger
 	subsystem   string
 }
 
@@ -40,7 +38,7 @@ func init() {
 }
 
 // NewFibreChannelCollector returns a new Collector exposing FibreChannel stats.
-func NewFibreChannelCollector(logger log.Logger) (Collector, error) {
+func NewFibreChannelCollector(logger *slog.Logger) (Collector, error) {
 	var i fibrechannelCollector
 	var err error
 
@@ -66,18 +64,6 @@ func NewFibreChannelCollector(logger log.Logger) (Collector, error) {
 		"rx_words_total":                 "Number of words received by host port",
 		"tx_frames_total":                "Number of frames transmitted by host port",
 		"link_failure_total":             "Number of times the host port link has failed",
-		"name":                           "Name of Fibre Channel HBA",
-		"speed":                          "Current operating speed",
-		"port_state":                     "Current port state",
-		"port_type":                      "Port type, what the port is connected to",
-		"symbolic_name":                  "Symoblic Name",
-		"node_name":                      "Node Name as hexadecimal string",
-		"port_id":                        "Port ID as string",
-		"port_name":                      "Port Name as hexadecimal string",
-		"fabric_name":                    "Fabric Name; 0 if PTP",
-		"dev_loss_tmo":                   "Device Loss Timeout in seconds",
-		"supported_classes":              "The FC classes supported",
-		"supported_speeds":               "The FC speeds supported",
 	}
 
 	i.metricDescs = make(map[string]*prometheus.Desc)
@@ -110,7 +96,7 @@ func (c *fibrechannelCollector) Update(ch chan<- prometheus.Metric) error {
 	hosts, err := c.fs.FibreChannelClass()
 	if err != nil {
 		if os.IsNotExist(err) {
-			level.Debug(c.logger).Log("msg", "fibrechannel statistics not found, skipping")
+			c.logger.Debug("fibrechannel statistics not found, skipping")
 			return ErrNoData
 		}
 		return fmt.Errorf("error obtaining FibreChannel class info: %s", err)
@@ -126,23 +112,78 @@ func (c *fibrechannelCollector) Update(ch chan<- prometheus.Metric) error {
 		infoValue := 1.0
 
 		// First push the Host values
-		ch <- prometheus.MustNewConstMetric(infoDesc, prometheus.GaugeValue, infoValue, host.Name, host.Speed, host.PortState, host.PortType, host.PortID, host.PortName, host.FabricName, host.SymbolicName, host.SupportedClasses, host.SupportedSpeeds, host.DevLossTMO)
+		ch <- prometheus.MustNewConstMetric(infoDesc, prometheus.GaugeValue, infoValue, SafeDereference(
+			host.Name,
+			host.Speed,
+			host.PortState,
+			host.PortType,
+			host.PortID,
+			host.PortName,
+			host.FabricName,
+			host.SymbolicName,
+			host.SupportedClasses,
+			host.SupportedSpeeds,
+			host.DevLossTMO,
+		)...)
 
 		// Then the counters
-		c.pushCounter(ch, "dumped_frames_total", host.Counters.DumpedFrames, host.Name)
-		c.pushCounter(ch, "error_frames_total", host.Counters.ErrorFrames, host.Name)
-		c.pushCounter(ch, "invalid_crc_total", host.Counters.InvalidCRCCount, host.Name)
-		c.pushCounter(ch, "rx_frames_total", host.Counters.RXFrames, host.Name)
-		c.pushCounter(ch, "rx_words_total", host.Counters.RXWords, host.Name)
-		c.pushCounter(ch, "tx_frames_total", host.Counters.TXFrames, host.Name)
-		c.pushCounter(ch, "tx_words_total", host.Counters.TXWords, host.Name)
-		c.pushCounter(ch, "seconds_since_last_reset_total", host.Counters.SecondsSinceLastReset, host.Name)
-		c.pushCounter(ch, "invalid_tx_words_total", host.Counters.InvalidTXWordCount, host.Name)
-		c.pushCounter(ch, "link_failure_total", host.Counters.LinkFailureCount, host.Name)
-		c.pushCounter(ch, "loss_of_sync_total", host.Counters.LossOfSyncCount, host.Name)
-		c.pushCounter(ch, "loss_of_signal_total", host.Counters.LossOfSignalCount, host.Name)
-		c.pushCounter(ch, "nos_total", host.Counters.NosCount, host.Name)
-		c.pushCounter(ch, "fcp_packet_aborts_total", host.Counters.FCPPacketAborts, host.Name)
+		// Note: These are not guaranteed to exist in the filesystem
+		if host.Counters.DumpedFrames == nil {
+			host.Counters.DumpedFrames = new(uint64)
+		}
+		if host.Counters.ErrorFrames == nil {
+			host.Counters.ErrorFrames = new(uint64)
+		}
+		if host.Counters.InvalidCRCCount == nil {
+			host.Counters.InvalidCRCCount = new(uint64)
+		}
+		if host.Counters.RXFrames == nil {
+			host.Counters.RXFrames = new(uint64)
+		}
+		if host.Counters.RXWords == nil {
+			host.Counters.RXWords = new(uint64)
+		}
+		if host.Counters.TXFrames == nil {
+			host.Counters.TXFrames = new(uint64)
+		}
+		if host.Counters.TXWords == nil {
+			host.Counters.TXWords = new(uint64)
+		}
+		if host.Counters.SecondsSinceLastReset == nil {
+			host.Counters.SecondsSinceLastReset = new(uint64)
+		}
+		if host.Counters.InvalidTXWordCount == nil {
+			host.Counters.InvalidTXWordCount = new(uint64)
+		}
+		if host.Counters.LinkFailureCount == nil {
+			host.Counters.LinkFailureCount = new(uint64)
+		}
+		if host.Counters.LossOfSyncCount == nil {
+			host.Counters.LossOfSyncCount = new(uint64)
+		}
+		if host.Counters.LossOfSignalCount == nil {
+			host.Counters.LossOfSignalCount = new(uint64)
+		}
+		if host.Counters.NosCount == nil {
+			host.Counters.NosCount = new(uint64)
+		}
+		if host.Counters.FCPPacketAborts == nil {
+			host.Counters.FCPPacketAborts = new(uint64)
+		}
+		c.pushCounter(ch, "dumped_frames_total", *host.Counters.DumpedFrames, *host.Name)
+		c.pushCounter(ch, "error_frames_total", *host.Counters.ErrorFrames, *host.Name)
+		c.pushCounter(ch, "invalid_crc_total", *host.Counters.InvalidCRCCount, *host.Name)
+		c.pushCounter(ch, "rx_frames_total", *host.Counters.RXFrames, *host.Name)
+		c.pushCounter(ch, "rx_words_total", *host.Counters.RXWords, *host.Name)
+		c.pushCounter(ch, "tx_frames_total", *host.Counters.TXFrames, *host.Name)
+		c.pushCounter(ch, "tx_words_total", *host.Counters.TXWords, *host.Name)
+		c.pushCounter(ch, "seconds_since_last_reset_total", *host.Counters.SecondsSinceLastReset, *host.Name)
+		c.pushCounter(ch, "invalid_tx_words_total", *host.Counters.InvalidTXWordCount, *host.Name)
+		c.pushCounter(ch, "link_failure_total", *host.Counters.LinkFailureCount, *host.Name)
+		c.pushCounter(ch, "loss_of_sync_total", *host.Counters.LossOfSyncCount, *host.Name)
+		c.pushCounter(ch, "loss_of_signal_total", *host.Counters.LossOfSignalCount, *host.Name)
+		c.pushCounter(ch, "nos_total", *host.Counters.NosCount, *host.Name)
+		c.pushCounter(ch, "fcp_packet_aborts_total", *host.Counters.FCPPacketAborts, *host.Name)
 	}
 
 	return nil

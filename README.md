@@ -1,7 +1,8 @@
 # Node exporter
 
-[![CircleCI](https://circleci.com/gh/prometheus/node_exporter/tree/master.svg?style=shield)][circleci]
-[![Buildkite status](https://badge.buildkite.com/94a0c1fb00b1f46883219c256efe9ce01d63b6505f3a942f9b.svg)](https://buildkite.com/prometheus/node-exporter)
+[![Build Status](https://github.com/prometheus/node_exporter/actions/workflows/ci.yml/badge.svg)](https://github.com/prometheus/node_exporter/actions/workflows/ci.yml)
+![bsd workflow](https://github.com/prometheus/node_exporter/actions/workflows/bsd.yml/badge.svg)
+![golangci-lint workflow](https://github.com/prometheus/node_exporter/actions/workflows/golangci-lint.yml/badge.svg)
 [![Docker Repository on Quay](https://quay.io/repository/prometheus/node-exporter/status)][quay]
 [![Docker Pulls](https://img.shields.io/docker/pulls/prom/node-exporter.svg?maxAge=604800)][hub]
 [![Go Report Card](https://goreportcard.com/badge/github.com/prometheus/node_exporter)][goreportcard]
@@ -11,7 +12,7 @@ in Go with pluggable metric collectors.
 
 The [Windows exporter](https://github.com/prometheus-community/windows_exporter) is recommended for Windows users.
 To expose NVIDIA GPU metrics, [prometheus-dcgm
-](https://github.com/NVIDIA/gpu-monitoring-tools#dcgm-exporter)
+](https://github.com/NVIDIA/dcgm-exporter)
 can be used.
 
 ## Installation and Usage
@@ -20,26 +21,26 @@ If you are new to Prometheus and `node_exporter` there is a [simple step-by-step
 
 The `node_exporter` listens on HTTP port 9100 by default. See the `--help` output for more options.
 
+### Linux distribution packages
+
+On Enterprise Linux (RHEL, CentOS Stream, Rocky Linux, AlmaLinux) and Fedora, `node_exporter` is packaged in [EPEL](https://docs.fedoraproject.org/en-US/epel/) as `golang-github-prometheus-node-exporter` (available for EPEL 7, 8 and 9):
+
 ### Ansible
 
-For automated installs with [Ansible](https://www.ansible.com/), there is the [Cloud Alchemy role](https://github.com/cloudalchemy/ansible-node-exporter).
-
-### RHEL/CentOS/Fedora
-
-There is a [community-supplied COPR repository](https://copr.fedorainfracloud.org/coprs/ibotty/prometheus-exporters/) which closely follows upstream releases.
+For automated installs with [Ansible](https://www.ansible.com/), there is the [Prometheus Community role](https://github.com/prometheus-community/ansible).
 
 ### Docker
 
-The `node_exporter` is designed to monitor the host system. It's not recommended
-to deploy it as a Docker container because it requires access to the host system.
+The `node_exporter` is designed to monitor the host system. Deploying in containers requires
+extra care in order to avoid monitoring the container itself.
 
-For situations where Docker deployment is needed, some extra flags must be used to allow
+For situations where containerized deployment is needed, some extra flags must be used to allow
 the `node_exporter` access to the host namespaces.
 
 Be aware that any non-root mount points you want to monitor will need to be bind-mounted
 into the container.
 
-If you start container for host monitoring, specify `path.rootfs` argument.
+If you start a container for host monitoring, specify the `path.rootfs` argument.
 This argument must match path in bind-mount of host root. The node\_exporter will use
 `path.rootfs` as prefix to access host filesystem.
 
@@ -83,6 +84,47 @@ Collectors are enabled by providing a `--collector.<name>` flag.
 Collectors that are enabled by default can be disabled by providing a `--no-collector.<name>` flag.
 To enable only some specific collector(s), use `--collector.disable-defaults --collector.<name> ...`.
 
+There are two meta-monitoring metrics available for checking the status of collectors.
+
+    node_scrape_collector_success
+    node_scrape_collector_duration_seconds
+
+Note that if a configured collector reads no data because it can't find a file in `/proc` or `/sys`,
+the success status will be 0. This is intentional to provide a way to detect faild drivers and similar
+problems.
+
+### Include & Exclude flags
+
+A few collectors can be configured to include or exclude certain patterns using dedicated flags. The exclude flags are used to indicate "all except", while the include flags are used to say "none except". Note that these flags are mutually exclusive on collectors that support both.
+
+Example:
+
+```txt
+--collector.filesystem.mount-points-exclude=^/(dev|proc|sys|var/lib/docker/.+|var/lib/kubelet/.+)($|/)
+```
+
+List:
+
+Collector | Scope | Include Flag | Exclude Flag
+--- | --- | --- | ---
+arp | device | --collector.arp.device-include | --collector.arp.device-exclude
+cpu | bugs | --collector.cpu.info.bugs-include | N/A
+cpu | flags | --collector.cpu.info.flags-include | N/A
+diskstats | device | --collector.diskstats.device-include | --collector.diskstats.device-exclude
+ethtool | device | --collector.ethtool.device-include | --collector.ethtool.device-exclude
+ethtool | metrics | --collector.ethtool.metrics-include | N/A
+filesystem | fs-types | --collector.filesystem.fs-types-include | --collector.filesystem.fs-types-exclude
+filesystem | mount-points | --collector.filesystem.mount-points-include | --collector.filesystem.mount-points-exclude
+hwmon | chip | --collector.hwmon.chip-include | --collector.hwmon.chip-exclude
+hwmon | sensor | --collector.hwmon.sensor-include | --collector.hwmon.sensor-exclude
+infiniband | device | --collector.infiniband.device-include | --collector.infiniband.device-exclude
+interrupts | name | --collector.interrupts.name-include | --collector.interrupts.name-exclude
+netdev | device | --collector.netdev.device-include | --collector.netdev.device-exclude
+qdisc | device | --collector.qdisc.device-include | --collector.qdisc.device-exclude
+slabinfo | slab-names | --collector.slabinfo.slabs-include | --collector.slabinfo.slabs-exclude
+sysctl | all | --collector.sysctl.include | N/A
+systemd | unit | --collector.systemd.unit-include | --collector.systemd.unit-exclude
+
 ### Enabled by default
 
 Name     | Description | OS
@@ -96,6 +138,8 @@ conntrack | Shows conntrack statistics (does nothing if no `/proc/sys/net/netfil
 cpu | Exposes CPU statistics | Darwin, Dragonfly, FreeBSD, Linux, Solaris, OpenBSD
 cpufreq | Exposes CPU frequency statistics | Linux, Solaris
 diskstats | Exposes disk I/O statistics. | Darwin, Linux, OpenBSD
+dmi | Expose Desktop Management Interface (DMI) info from `/sys/class/dmi/id/` | Linux
+dmmultipath | Exposes DM-multipath device and path metrics from `/sys/block/dm-*`. | Linux
 edac | Exposes error detection and correction statistics. | Linux
 entropy | Exposes available entropy. | Linux
 exec | Exposes execution statistics. | Dragonfly, FreeBSD
@@ -105,12 +149,13 @@ filesystem | Exposes filesystem statistics, such as disk space used. | Darwin, D
 hwmon | Expose hardware monitoring and sensor data from `/sys/class/hwmon/`. | Linux
 infiniband | Exposes network statistics specific to InfiniBand and Intel OmniPath configurations. | Linux
 ipvs | Exposes IPVS status from `/proc/net/ip_vs` and stats from `/proc/net/ip_vs_stats`. | Linux
-lnstat | Exposes stats from `/proc/net/stat/`. | Linux
+kernel_hung | Exposes number of tasks that have been detected as hung from `/proc/sys/kernel/hung_task_detect_count`. | Linux
 loadavg | Exposes load average. | Darwin, Dragonfly, FreeBSD, Linux, NetBSD, OpenBSD, Solaris
 mdadm | Exposes statistics about devices in `/proc/mdstat` (does nothing if no `/proc/mdstat` present). | Linux
 meminfo | Exposes memory statistics. | Darwin, Dragonfly, FreeBSD, Linux, OpenBSD
 netclass | Exposes network interface info from `/sys/class/net/` | Linux
 netdev | Exposes network interface statistics such as bytes transferred. | Darwin, Dragonfly, FreeBSD, Linux, OpenBSD
+netisr | Exposes netisr statistics | FreeBSD
 netstat | Exposes network statistics from `/proc/net/netstat`. This is the same information as `netstat -s`. | Linux
 nfs | Exposes NFS client statistics from `/proc/net/rpc/nfs`. This is the same information as `nfsstat -c`. | Linux
 nfsd | Exposes NFS kernel server statistics from `/proc/net/rpc/nfsd`. This is the same information as `nfsstat -s`. | Linux
@@ -120,19 +165,22 @@ powersupplyclass | Exposes Power Supply statistics from `/sys/class/power_supply
 pressure | Exposes pressure stall statistics from `/proc/pressure/`. | Linux (kernel 4.20+ and/or [CONFIG\_PSI](https://www.kernel.org/doc/html/latest/accounting/psi.html))
 rapl | Exposes various statistics from `/sys/class/powercap`. | Linux
 schedstat | Exposes task scheduler statistics from `/proc/schedstat`. | Linux
+selinux | Exposes SELinux statistics. | Linux
 sockstat | Exposes various statistics from `/proc/net/sockstat`. | Linux
 softnet | Exposes statistics from `/proc/net/softnet_stat`. | Linux
 stat | Exposes various statistics from `/proc/stat`. This includes boot time, forks and interrupts. | Linux
 tapestats | Exposes statistics from `/sys/class/scsi_tape`. | Linux
 textfile | Exposes statistics read from local disk. The `--collector.textfile.directory` flag must be set. | _any_
+thermal | Exposes thermal statistics like `pmset -g therm`. | Darwin
 thermal\_zone | Exposes thermal zone & cooling device statistics from `/sys/class/thermal`. | Linux
 time | Exposes the current system time. | _any_
 timex | Exposes selected adjtimex(2) system call stats. | Linux
 udp_queues | Exposes UDP total lengths of the rx_queue and tx_queue from `/proc/net/udp` and `/proc/net/udp6`. | Linux
 uname | Exposes system information as provided by the uname system call. | Darwin, FreeBSD, Linux, OpenBSD
 vmstat | Exposes statistics from `/proc/vmstat`. | Linux
+watchdog | Exposes statistics from `/sys/class/watchdog` | Linux
 xfs | Exposes XFS runtime statistics. | Linux (kernel 4.4+)
-zfs | Exposes [ZFS](http://open-zfs.org/) performance statistics. | [Linux](http://zfsonlinux.org/), Solaris
+zfs | Exposes [ZFS](http://open-zfs.org/) performance statistics. | FreeBSD, [Linux](http://zfsonlinux.org/), Solaris
 
 ### Disabled by default
 
@@ -153,6 +201,51 @@ and does not time out.  In addition, monitor the
 `scrape_samples_post_metric_relabeling` metric to see the changes in
 cardinality.
 
+Name     | Description | OS
+---------|-------------|----
+buddyinfo | Exposes statistics of memory fragments as reported by /proc/buddyinfo. | Linux
+cgroups | A summary of the number of active and enabled cgroups | Linux
+cpu\_vulnerabilities | Exposes CPU vulnerability information from sysfs. | Linux
+devstat | Exposes device statistics | Dragonfly, FreeBSD
+drm | Expose GPU metrics using sysfs / DRM, `amdgpu` is the only driver which exposes this information through DRM | Linux
+drbd | Exposes Distributed Replicated Block Device statistics (to version 8.4) | Linux
+ethtool | Exposes network interface information and network driver statistics equivalent to `ethtool`, `ethtool -S`, and `ethtool -i`. | Linux
+interrupts | Exposes detailed interrupts statistics. | Linux, OpenBSD
+ksmd | Exposes kernel and system statistics from `/sys/kernel/mm/ksm`. | Linux
+lnstat | Exposes stats from `/proc/net/stat/`. | Linux
+logind | Exposes session counts from [logind](http://www.freedesktop.org/wiki/Software/systemd/logind/). | Linux
+meminfo\_numa | Exposes memory statistics from `/sys/devices/system/node/node[0-9]*/meminfo`, `/sys/devices/system/node/node[0-9]*/numastat`. | Linux
+mountstats | Exposes filesystem statistics from `/proc/self/mountstats`. Exposes detailed NFS client statistics. | Linux
+network_route | Exposes the routing table as metrics | Linux
+nvmesubsystem | Exposes NVMe over Fabrics subsystem path health metrics from `/sys/class/nvme-subsystem/`. | Linux
+pcidevice | Exposes pci devices' information including their link status and parent devices. | Linux
+perf | Exposes perf based metrics (Warning: Metrics are dependent on kernel configuration and settings). | Linux
+processes | Exposes aggregate process statistics from `/proc`. | Linux
+qdisc | Exposes [queuing discipline](https://en.wikipedia.org/wiki/Network_scheduler#Linux_kernel) statistics | Linux
+resctrl | Exposes Intel RDT / AMD PQoS / ARM MPAM memory bandwidth and cache occupancy monitoring counters from the resctrl filesystem root group (must be mounted, see [below](#resctrl-collector)). | Linux
+slabinfo | Exposes slab statistics from `/proc/slabinfo`. Note that permission of `/proc/slabinfo` is usually 0400, so set it appropriately. | Linux
+softirqs | Exposes detailed softirq statistics from `/proc/softirqs`. | Linux
+sysctl | Expose sysctl values from `/proc/sys`. Use `--collector.sysctl.include(-info)` to configure. | Linux
+swap | Expose swap information from `/proc/swaps`. | Linux
+systemd | Exposes service and system status from [systemd](http://www.freedesktop.org/wiki/Software/systemd/). | Linux
+tainted | Exposes kernel taint flags from `/proc/sys/kernel/tainted`. | Linux
+tcpstat | Exposes TCP connection status information from `/proc/net/tcp` and `/proc/net/tcp6`. (Warning: the current version has potential performance issues in high load situations.) | Linux
+wifi | Exposes WiFi device and station statistics. | Linux
+xfrm | Exposes statistics from `/proc/net/xfrm_stat` | Linux
+zoneinfo | Exposes NUMA memory zone metrics. | Linux
+
+### Deprecated
+
+These collectors are deprecated and will be removed in the next major release.
+
+Name     | Description | OS
+---------|-------------|----
+ntp | Exposes local NTP daemon health to check [time](./docs/TIME.md) | _any_
+runit | Exposes service status from [runit](http://smarden.org/runit/). | _any_
+supervisord | Exposes service status from [supervisord](http://supervisord.org/). | _any_
+
+### Perf Collector
+
 The `perf` collector may not work out of the box on some Linux systems due to kernel
 configuration and security settings. To allow access, set the following `sysctl`
 parameter:
@@ -172,7 +265,7 @@ perf_event_open`](http://man7.org/linux/man-pages/man2/perf_event_open.2.html).
 
 By default, the `perf` collector will only collect metrics of the CPUs that
 `node_exporter` is running on (ie
-[`runtime.NumCPU`](https://golang.org/pkg/runtime/#NumCPU). If this is
+[`runtime.NumCPU`](https://pkg.go.dev/runtime#NumCPU). If this is
 insufficient (e.g. if you run `node_exporter` with its CPU affinity set to
 specific CPUs), you can specify a list of alternate CPUs by using the
 `--collector.perf.cpus` flag. For example, to collect metrics on CPUs 2-6, you
@@ -188,30 +281,74 @@ found using [`perf list`](http://man7.org/linux/man-pages/man1/perf.1.html) or
 from debugfs. And example usage of this would be
 `--collector.perf.tracepoint="sched:sched_process_exec"`.
 
+### Resctrl Collector
 
-Name     | Description | OS
----------|-------------|----
-buddyinfo | Exposes statistics of memory fragments as reported by /proc/buddyinfo. | Linux
-devstat | Exposes device statistics | Dragonfly, FreeBSD
-drbd | Exposes Distributed Replicated Block Device statistics (to version 8.4) | Linux
-ethtool | Exposes network interface and network driver statistics equivalent to `ethtool -S` and `ethtool -i`. | Linux
-interrupts | Exposes detailed interrupts statistics. | Linux, OpenBSD
-ksmd | Exposes kernel and system statistics from `/sys/kernel/mm/ksm`. | Linux
-logind | Exposes session counts from [logind](http://www.freedesktop.org/wiki/Software/systemd/logind/). | Linux
-meminfo\_numa | Exposes memory statistics from `/proc/meminfo_numa`. | Linux
-mountstats | Exposes filesystem statistics from `/proc/self/mountstats`. Exposes detailed NFS client statistics. | Linux
-network_route | Exposes the routing table as metrics | Linux
-ntp | Exposes local NTP daemon health to check [time](./docs/TIME.md) | _any_
-perf | Exposes perf based metrics (Warning: Metrics are dependent on kernel configuration and settings). | Linux
-processes | Exposes aggregate process statistics from `/proc`. | Linux
-qdisc | Exposes [queuing discipline](https://en.wikipedia.org/wiki/Network_scheduler#Linux_kernel) statistics | Linux
-runit | Exposes service status from [runit](http://smarden.org/runit/). | _any_
-supervisord | Exposes service status from [supervisord](http://supervisord.org/). | _any_
-systemd | Exposes service and system status from [systemd](http://www.freedesktop.org/wiki/Software/systemd/). | Linux
-tcpstat | Exposes TCP connection status information from `/proc/net/tcp` and `/proc/net/tcp6`. (Warning: the current version has potential performance issues in high load situations.) | Linux
-wifi | Exposes WiFi device and station statistics. | Linux
-zoneinfo | Exposes NUMA memory zone metrics. | Linux
+The `resctrl` collector is disabled by default because the filesystem it reads is usually not mounted.
+To enable it, first mount the filesystem and then start `node_exporter` with the collector enabled:
+```
+mount -t resctrl resctrl /sys/fs/resctrl
+node_exporter --collector.resctrl
+```
 
+From Linux 6.19 a CPU with assignable bandwidth monitoring counters comes up in `mbm_event` mode.
+The classic mode (required by this collector) can be enabled with:
+
+```
+echo default > /sys/fs/resctrl/info/L3_MON/mbm_assign_mode   # fails harmlessly on older kernels
+```
+
+See the [kernel documentation](https://docs.kernel.org/filesystems/resctrl.html) for more details.
+
+### Sysctl Collector
+
+The `sysctl` collector can be enabled with `--collector.sysctl`. It supports exposing numeric sysctl values
+as metrics using the `--collector.sysctl.include` flag and string values as info metrics by using the
+`--collector.sysctl.include-info` flag. The flags can be repeated. For sysctl with multiple numeric values,
+an optional mapping can be given to expose each value as its own metric. Otherwise an `index` label is used
+to identify the different fields.
+
+#### Examples
+##### Numeric values
+###### Single values
+Using `--collector.sysctl.include=vm.user_reserve_kbytes`:
+`vm.user_reserve_kbytes = 131072` -> `node_sysctl_vm_user_reserve_kbytes 131072`
+
+###### Multiple values
+A sysctl can contain multiple values, for example:
+```
+net.ipv4.tcp_rmem = 4096	131072	6291456
+```
+Using `--collector.sysctl.include=net.ipv4.tcp_rmem` the collector will expose:
+```
+node_sysctl_net_ipv4_tcp_rmem{index="0"} 4096
+node_sysctl_net_ipv4_tcp_rmem{index="1"} 131072
+node_sysctl_net_ipv4_tcp_rmem{index="2"} 6291456
+```
+If the indexes have defined meaning like in this case, the values can be mapped to multiple metrics by appending the mapping to the --collector.sysctl.include flag:
+Using `--collector.sysctl.include=net.ipv4.tcp_rmem:min,default,max` the collector will expose:
+```
+node_sysctl_net_ipv4_tcp_rmem_min 4096
+node_sysctl_net_ipv4_tcp_rmem_default 131072
+node_sysctl_net_ipv4_tcp_rmem_max 6291456
+```
+
+##### String values
+String values need to be exposed as info metric. The user selects them by using the `--collector.sysctl.include-info` flag.
+
+###### Single values
+`kernel.core_pattern = core` -> `node_sysctl_info{key="kernel.core_pattern_info", value="core"} 1`
+
+###### Multiple values
+Given the following sysctl:
+```
+kernel.seccomp.actions_avail = kill_process kill_thread trap errno trace log allow
+```
+Setting `--collector.sysctl.include-info=kernel.seccomp.actions_avail` will yield:
+```
+node_sysctl_info{key="kernel.seccomp.actions_avail", index="0", value="kill_process"} 1
+node_sysctl_info{key="kernel.seccomp.actions_avail", index="1", value="kill_thread"} 1
+...
+```
 
 ### Textfile Collector
 
@@ -242,13 +379,21 @@ mv /path/to/directory/role.prom.$$ /path/to/directory/role.prom
 
 The `node_exporter` will expose all metrics from enabled collectors by default.  This is the recommended way to collect metrics to avoid errors when comparing metrics of different families.
 
-For advanced use the `node_exporter` can be passed an optional list of collectors to filter metrics. The `collect[]` parameter may be used multiple times.  In Prometheus configuration you can use this syntax under the [scrape config](https://prometheus.io/docs/prometheus/latest/configuration/configuration/#<scrape_config>).
+For advanced use the `node_exporter` can be passed an optional list of collectors to filter metrics. The parameters `collect[]` and `exclude[]` can be used multiple times (but cannot be combined).  In Prometheus configuration you can use this syntax under the [scrape config](https://prometheus.io/docs/prometheus/latest/configuration/configuration/#<scrape_config>).
 
+Collect only `cpu` and `meminfo` collector metrics:
 ```
   params:
     collect[]:
-      - foo
-      - bar
+      - cpu
+      - meminfo
+```
+
+Collect all enabled collector metrics but exclude `netdev`:
+```
+  params:
+    exclude[]:
+      - netdev
 ```
 
 This can be useful for having different Prometheus servers collect specific metrics from nodes.
@@ -257,14 +402,14 @@ This can be useful for having different Prometheus servers collect specific metr
 
 Prerequisites:
 
-* [Go compiler](https://golang.org/dl/)
+* [Go compiler](https://go.dev/dl/)
 * RHEL/CentOS: `glibc-static` package.
 
 Building:
 
     git clone https://github.com/prometheus/node_exporter.git
     cd node_exporter
-    make
+    make build
     ./node_exporter <flags>
 
 To see all available configuration flags:
@@ -277,15 +422,15 @@ To see all available configuration flags:
 
 ## TLS endpoint
 
-** EXPERIMENTAL **
+**EXPERIMENTAL**
 
 The exporter supports TLS via a new web configuration file.
 
 ```console
-./node_exporter --web.config=web-config.yml
+./node_exporter --web.config.file=web-config.yml
 ```
 
-See the [exporter-toolkit https package](https://github.com/prometheus/exporter-toolkit/blob/v0.1.0/https/README.md) for more details.
+See the [exporter-toolkit web-configuration](https://github.com/prometheus/exporter-toolkit/blob/master/docs/web-configuration.md) for more details.
 
 [travis]: https://travis-ci.org/prometheus/node_exporter
 [hub]: https://hub.docker.com/r/prom/node-exporter/

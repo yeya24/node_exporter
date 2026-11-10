@@ -11,27 +11,32 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// +build !nothermalzone
+//go:build !nothermalzone
 
 package collector
 
 import (
+	"errors"
 	"fmt"
+	"log/slog"
+	"os"
+	"syscall"
 
-	"github.com/go-kit/log"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/procfs/sysfs"
 )
 
-const coolingDevice = "cooling_device"
-const thermalZone = "thermal_zone"
+const (
+	coolingDevice = "cooling_device"
+	thermalZone   = "thermal_zone"
+)
 
 type thermalZoneCollector struct {
 	fs                    sysfs.FS
 	coolingDeviceCurState *prometheus.Desc
 	coolingDeviceMaxState *prometheus.Desc
 	zoneTemp              *prometheus.Desc
-	logger                log.Logger
+	logger                *slog.Logger
 }
 
 func init() {
@@ -39,7 +44,7 @@ func init() {
 }
 
 // NewThermalZoneCollector returns a new Collector exposing kernel/system statistics.
-func NewThermalZoneCollector(logger log.Logger) (Collector, error) {
+func NewThermalZoneCollector(logger *slog.Logger) (Collector, error) {
 	fs, err := sysfs.NewFS(*sysPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open sysfs: %w", err)
@@ -69,6 +74,10 @@ func NewThermalZoneCollector(logger log.Logger) (Collector, error) {
 func (c *thermalZoneCollector) Update(ch chan<- prometheus.Metric) error {
 	thermalZones, err := c.fs.ClassThermalZoneStats()
 	if err != nil {
+		if errors.Is(err, os.ErrNotExist) || errors.Is(err, os.ErrPermission) || errors.Is(err, os.ErrInvalid) || errors.Is(err, syscall.EINVAL) {
+			c.logger.Debug("Could not read thermal zone stats", "err", err)
+			return ErrNoData
+		}
 		return err
 	}
 

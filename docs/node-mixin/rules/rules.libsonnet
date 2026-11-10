@@ -14,11 +14,11 @@
             ||| % $._config,
           },
           {
-            // CPU utilisation is % CPU is not idle.
+            // CPU utilisation is % CPU without {idle,iowait,steal}.
             record: 'instance:node_cpu_utilisation:rate%(rateInterval)s' % $._config,
             expr: |||
-              1 - avg without (cpu, mode) (
-                rate(node_cpu_seconds_total{%(nodeExporterSelector)s, mode="idle"}[%(rateInterval)s])
+              1 - avg without (cpu) (
+                sum without (mode) (rate(node_cpu_seconds_total{%(nodeExporterSelector)s, mode=~"idle|iowait|steal"}[%(rateInterval)s]))
               )
             ||| % $._config,
           },
@@ -41,16 +41,18 @@
             record: 'instance:node_memory_utilisation:ratio',
             expr: |||
               1 - (
-                node_memory_MemAvailable_bytes{%(nodeExporterSelector)s}
-                or
                 (
-                  node_memory_Buffers_bytes{%(nodeExporterSelector)s}
-                  +
-                  node_memory_Cached_bytes{%(nodeExporterSelector)s}
-                  +
-                  node_memory_MemFree_bytes{%(nodeExporterSelector)s}
-                  +
-                  node_memory_Slab_bytes{%(nodeExporterSelector)s}
+                  node_memory_MemAvailable_bytes{%(nodeExporterSelector)s}
+                  or
+                  (
+                    node_memory_Buffers_bytes{%(nodeExporterSelector)s}
+                    +
+                    node_memory_Cached_bytes{%(nodeExporterSelector)s}
+                    +
+                    node_memory_MemFree_bytes{%(nodeExporterSelector)s}
+                    +
+                    node_memory_Slab_bytes{%(nodeExporterSelector)s}
+                  )
                 )
               /
                 node_memory_MemTotal_bytes{%(nodeExporterSelector)s}
@@ -107,6 +109,39 @@
             expr: |||
               sum without (device) (
                 rate(node_network_transmit_drop_total{%(nodeExporterSelector)s, device!="lo"}[%(rateInterval)s])
+              )
+            ||| % $._config,
+          },
+          {
+            record: 'instance:node_network_receive_bytes_physical:rate%(rateInterval)s' % $._config,
+            expr: |||
+              sum without (device) (
+                rate(node_network_receive_bytes_total{%(nodeExporterSelector)s, %(netDeviceSelector)s}[%(rateInterval)s])
+              )
+            ||| % $._config,
+          },
+          {
+            record: 'instance:node_network_transmit_bytes_physical:rate%(rateInterval)s' % $._config,
+            expr: |||
+              sum without (device) (
+                rate(node_network_transmit_bytes_total{%(nodeExporterSelector)s, %(netDeviceSelector)s}[%(rateInterval)s])
+              )
+            ||| % $._config,
+          },
+          // TODO: Find out if those drops ever happen on modern switched networks.
+          {
+            record: 'instance:node_network_receive_drop_physical:rate%(rateInterval)s' % $._config,
+            expr: |||
+              sum without (device) (
+                rate(node_network_receive_drop_total{%(nodeExporterSelector)s, %(netDeviceSelector)s}[%(rateInterval)s])
+              )
+            ||| % $._config,
+          },
+          {
+            record: 'instance:node_network_transmit_drop_physical:rate%(rateInterval)s' % $._config,
+            expr: |||
+              sum without (device) (
+                rate(node_network_transmit_drop_total{%(nodeExporterSelector)s, %(netDeviceSelector)s}[%(rateInterval)s])
               )
             ||| % $._config,
           },

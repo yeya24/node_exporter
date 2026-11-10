@@ -12,7 +12,7 @@ Prometheus uses GitHub to manage reviews of pull requests.
   of inspiration.
 
 * Relevant coding style guidelines are the [Go Code Review
-  Comments](https://code.google.com/p/go-wiki/wiki/CodeReviewComments)
+  Comments](https://go.dev/wiki/CodeReviewComments)
   and the _Formatting and style_ section of Peter Bourgon's [Go: Best
   Practices for Production
   Environments](http://peter.bourgon.org/go-in-production/#formatting-and-style).
@@ -46,3 +46,8 @@ dedicated exporter instead or gather the metrics via the textfile collector.
 
 The Node Exporter tries to support the most common machine metrics. For more
 exotic metrics, use the textfile collector or a dedicated Exporter.
+
+Collectors should return `ErrNoData` when they can not find any metrics to collect.
+This is intentional as it provides a means for users to differentiate between
+the desired system configuration and the running configuration. For example if
+a system has a piece of hardware but the driver fails to load.

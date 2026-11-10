@@ -11,20 +11,23 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// +build !nodiskstats
+//go:build !nodiskstats
 
 package collector
 
 import (
+	"fmt"
+	"log/slog"
 	"unsafe"
 
-	"github.com/go-kit/log"
 	"github.com/prometheus/client_golang/prometheus"
 	"golang.org/x/sys/unix"
 )
 
 const (
 	DS_DISKNAMELEN = 16
+
+	diskstatsDefaultIgnoredDevices = ""
 )
 
 type DiskStats struct {
@@ -46,7 +49,9 @@ type diskstatsCollector struct {
 	wxfer  typedDesc
 	wbytes typedDesc
 	time   typedDesc
-	logger log.Logger
+
+	deviceFilter deviceFilter
+	logger       *slog.Logger
 }
 
 func init() {
@@ -54,14 +59,21 @@ func init() {
 }
 
 // NewDiskstatsCollector returns a new Collector exposing disk device stats.
-func NewDiskstatsCollector(logger log.Logger) (Collector, error) {
+func NewDiskstatsCollector(logger *slog.Logger) (Collector, error) {
+	deviceFilter, err := newDiskstatsDeviceFilter(logger)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse device filter flags: %w", err)
+	}
+
 	return &diskstatsCollector{
 		rxfer:  typedDesc{readsCompletedDesc, prometheus.CounterValue},
 		rbytes: typedDesc{readBytesDesc, prometheus.CounterValue},
 		wxfer:  typedDesc{writesCompletedDesc, prometheus.CounterValue},
 		wbytes: typedDesc{writtenBytesDesc, prometheus.CounterValue},
 		time:   typedDesc{ioTimeSecondsDesc, prometheus.CounterValue},
-		logger: logger,
+
+		deviceFilter: deviceFilter,
+		logger:       logger,
 	}, nil
 }
 
@@ -77,6 +89,9 @@ func (c *diskstatsCollector) Update(ch chan<- prometheus.Metric) (err error) {
 	for i := 0; i < ndisks; i++ {
 		dn := *(*[DS_DISKNAMELEN]int8)(unsafe.Pointer(&diskstats[i].Name[0]))
 		diskname := int8ToString(dn[:])
+		if c.deviceFilter.ignored(diskname) {
+			continue
+		}
 
 		ch <- c.rxfer.mustNewConstMetric(float64(diskstats[i].Rxfer), diskname)
 		ch <- c.rbytes.mustNewConstMetric(float64(diskstats[i].Rbytes), diskname)

@@ -11,34 +11,32 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// +build !novmstat
+//go:build !novmstat
 
 package collector
 
 import (
 	"bufio"
 	"fmt"
+	"log/slog"
 	"os"
 	"regexp"
 	"strconv"
 	"strings"
 
-	"github.com/go-kit/log"
+	"github.com/alecthomas/kingpin/v2"
 	"github.com/prometheus/client_golang/prometheus"
-	"gopkg.in/alecthomas/kingpin.v2"
 )
 
 const (
 	vmStatSubsystem = "vmstat"
 )
 
-var (
-	vmStatFields = kingpin.Flag("collector.vmstat.fields", "Regexp of fields to return for vmstat collector.").Default("^(oom_kill|pgpg|pswp|pg.*fault).*").String()
-)
+var vmStatFields = kingpin.Flag("collector.vmstat.fields", "Regexp of fields to return for vmstat collector.").Default("^(oom_kill|pgpg|pswp|pg.*fault).*").String()
 
 type vmStatCollector struct {
 	fieldPattern *regexp.Regexp
-	logger       log.Logger
+	logger       *slog.Logger
 }
 
 func init() {
@@ -46,7 +44,7 @@ func init() {
 }
 
 // NewvmStatCollector returns a new Collector exposing vmstat stats.
-func NewvmStatCollector(logger log.Logger) (Collector, error) {
+func NewvmStatCollector(logger *slog.Logger) (Collector, error) {
 	pattern := regexp.MustCompile(*vmStatFields)
 	return &vmStatCollector{
 		fieldPattern: pattern,

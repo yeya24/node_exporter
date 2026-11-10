@@ -11,25 +11,25 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// +build !nonetworkroute
+//go:build !nonetworkroute
 
 package collector
 
 import (
 	"fmt"
-	"golang.org/x/sys/unix"
+	"log/slog"
 	"net"
 	"strconv"
 
-	"github.com/go-kit/log"
-	"github.com/jsimonetti/rtnetlink"
+	"github.com/jsimonetti/rtnetlink/v2"
 	"github.com/prometheus/client_golang/prometheus"
+	"golang.org/x/sys/unix"
 )
 
 type networkRouteCollector struct {
 	routeInfoDesc *prometheus.Desc
 	routesDesc    *prometheus.Desc
-	logger        log.Logger
+	logger        *slog.Logger
 }
 
 func init() {
@@ -37,7 +37,7 @@ func init() {
 }
 
 // NewNetworkRouteCollector returns a new Collector exposing systemd statistics.
-func NewNetworkRouteCollector(logger log.Logger) (Collector, error) {
+func NewNetworkRouteCollector(logger *slog.Logger) (Collector, error) {
 	const subsystem = "network"
 
 	routeInfoDesc := prometheus.NewDesc(
@@ -131,8 +131,8 @@ func (n networkRouteCollector) Update(ch chan<- prometheus.Metric) error {
 	return nil
 }
 
-func networkRouteIPWithPrefixToString(ip net.IP, len uint8) string {
-	if len == 0 {
+func networkRouteIPWithPrefixToString(ip net.IP, length uint8) string {
+	if length == 0 {
 		return "default"
 	}
 	iplen := net.IPv4len
@@ -141,7 +141,7 @@ func networkRouteIPWithPrefixToString(ip net.IP, len uint8) string {
 	}
 	network := &net.IPNet{
 		IP:   ip,
-		Mask: net.CIDRMask(int(len), iplen*8),
+		Mask: net.CIDRMask(int(length), iplen*8),
 	}
 	return network.String()
 }

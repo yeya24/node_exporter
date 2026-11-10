@@ -15,9 +15,8 @@ package collector
 
 import (
 	"fmt"
+	"log/slog"
 	"reflect"
-
-	"github.com/go-kit/log"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/procfs"
@@ -28,7 +27,7 @@ const zoneinfoSubsystem = "zoneinfo"
 type zoneinfoCollector struct {
 	gaugeMetricDescs   map[string]*prometheus.Desc
 	counterMetricDescs map[string]*prometheus.Desc
-	logger             log.Logger
+	logger             *slog.Logger
 	fs                 procfs.FS
 }
 
@@ -37,7 +36,7 @@ func init() {
 }
 
 // NewZoneinfoCollector returns a new Collector exposing zone stats.
-func NewZoneinfoCollector(logger log.Logger) (Collector, error) {
+func NewZoneinfoCollector(logger *slog.Logger) (Collector, error) {
 	fs, err := procfs.NewFS(*procPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open procfs: %w", err)
@@ -93,6 +92,7 @@ func (c *zoneinfoCollector) Update(ch chan<- prometheus.Metric) error {
 	}
 	return nil
 }
+
 func createGaugeMetricDescriptions() map[string]*prometheus.Desc {
 	return map[string]*prometheus.Desc{
 		"NrFreePages": prometheus.NewDesc(
@@ -200,8 +200,8 @@ func createGaugeMetricDescriptions() map[string]*prometheus.Desc {
 			"Number of shmem pages (included tmpfs/GEM pages)",
 			[]string{"node", "zone"}, nil),
 	}
-
 }
+
 func createCounterMetricDescriptions() map[string]*prometheus.Desc {
 	return map[string]*prometheus.Desc{
 		"NrDirtied": prometheus.NewDesc(

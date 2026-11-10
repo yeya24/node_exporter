@@ -11,12 +11,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+//go:build !nologind
+
 package collector
 
 import (
 	"testing"
 
-	"github.com/godbus/dbus"
+	"github.com/godbus/dbus/v5"
 	"github.com/prometheus/client_golang/prometheus"
 )
 
@@ -80,7 +82,6 @@ func TestLogindCollectorKnownStringOrOther(t *testing.T) {
 	if actual != expected {
 		t.Errorf("knownStringOrOther failed: got %q, expected %q.", actual, expected)
 	}
-
 }
 
 func TestLogindCollectorCollectMetrics(t *testing.T) {

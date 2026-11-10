@@ -11,8 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// +build openbsd,!amd64
-// +build !nointerrupts
+//go:build !nointerrupts && !amd64
 
 package collector
 
@@ -95,9 +94,7 @@ sysctl_intr(struct intr *intr, int idx)
 */
 import "C"
 
-var (
-	interruptLabelNames = []string{"cpu", "type", "devices"}
-)
+var interruptLabelNames = []string{"cpu", "type", "devices"}
 
 func (c *interruptsCollector) Update(ch chan<- prometheus.Metric) error {
 	interrupts, err := getInterrupts()
@@ -106,10 +103,20 @@ func (c *interruptsCollector) Update(ch chan<- prometheus.Metric) error {
 	}
 	for dev, interrupt := range interrupts {
 		for cpuNo, value := range interrupt.values {
+			interruptType := fmt.Sprintf("%d", interrupt.vector)
+			filterName := interruptType + ";" + dev
+			if c.nameFilter.ignored(filterName) {
+				c.logger.Debug("ignoring interrupt name", "filter_name", filterName)
+				continue
+			}
+			if !c.includeZeros && value == 0.0 {
+				c.logger.Debug("ignoring interrupt with zero value", "filter_name", filterName, "cpu", cpuNo)
+				continue
+			}
 			ch <- c.desc.mustNewConstMetric(
 				value,
 				strconv.Itoa(cpuNo),
-				strconv.Itoa(interrupt.vector),
+				interruptType,
 				dev,
 			)
 		}

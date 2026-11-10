@@ -11,17 +11,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+//go:build !nodiskstats
+
 package collector
 
 import (
 	"fmt"
-	"os"
+	"io"
+	"log/slog"
 	"strings"
 	"testing"
 
-	"github.com/go-kit/log"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/testutil"
+	"github.com/prometheus/procfs/blockdevice"
 )
 
 type testDiskStatsCollector struct {
@@ -36,7 +39,7 @@ func (c testDiskStatsCollector) Describe(ch chan<- *prometheus.Desc) {
 	prometheus.DescribeByCollect(c, ch)
 }
 
-func NewTestDiskStatsCollector(logger log.Logger) (prometheus.Collector, error) {
+func NewTestDiskStatsCollector(logger *slog.Logger) (prometheus.Collector, error) {
 	dsc, err := NewDiskstatsCollector(logger)
 	if err != nil {
 		return testDiskStatsCollector{}, err
@@ -49,8 +52,43 @@ func NewTestDiskStatsCollector(logger log.Logger) (prometheus.Collector, error) 
 func TestDiskStats(t *testing.T) {
 	*sysPath = "fixtures/sys"
 	*procPath = "fixtures/proc"
-	*ignoredDevices = "^(ram|loop|fd|(h|s|v|xv)d[a-z]|nvme\\d+n\\d+p)\\d+$"
-	testcase := `# HELP node_disk_discard_time_seconds_total This is the total number of seconds spent by all discards.
+	*udevDataPath = "fixtures/udev/data"
+	*diskstatsDeviceExclude = "^(z?ram|loop|fd|(h|s|v|xv)d[a-z]|nvme\\d+n\\d+p)\\d+$"
+	testcase := `# HELP node_disk_ata_rotation_rate_rpm ATA disk rotation rate in RPMs (0 for SSDs).
+# TYPE node_disk_ata_rotation_rate_rpm gauge
+node_disk_ata_rotation_rate_rpm{device="sda"} 7200
+node_disk_ata_rotation_rate_rpm{device="sdb"} 0
+node_disk_ata_rotation_rate_rpm{device="sdc"} 0
+# HELP node_disk_ata_write_cache ATA disk has a write cache.
+# TYPE node_disk_ata_write_cache gauge
+node_disk_ata_write_cache{device="sda"} 1
+node_disk_ata_write_cache{device="sdb"} 1
+node_disk_ata_write_cache{device="sdc"} 1
+# HELP node_disk_ata_write_cache_enabled ATA disk has its write cache enabled.
+# TYPE node_disk_ata_write_cache_enabled gauge
+node_disk_ata_write_cache_enabled{device="sda"} 0
+node_disk_ata_write_cache_enabled{device="sdb"} 1
+node_disk_ata_write_cache_enabled{device="sdc"} 0
+# HELP node_disk_device_mapper_backing_device_info Info about the underlying block devices of a device mapper device.
+# TYPE node_disk_device_mapper_backing_device_info gauge
+node_disk_device_mapper_backing_device_info{backing_device="dm-0",device="dm-1"} 1
+node_disk_device_mapper_backing_device_info{backing_device="dm-0",device="dm-2"} 1
+node_disk_device_mapper_backing_device_info{backing_device="dm-0",device="dm-3"} 1
+node_disk_device_mapper_backing_device_info{backing_device="dm-0",device="dm-4"} 1
+node_disk_device_mapper_backing_device_info{backing_device="nvme0n1p3",device="dm-0"} 1
+node_disk_device_mapper_backing_device_info{backing_device="sdi",device="dm-5"} 1
+node_disk_device_mapper_backing_device_info{backing_device="sdj",device="dm-5"} 1
+node_disk_device_mapper_backing_device_info{backing_device="sdk",device="dm-5"} 1
+node_disk_device_mapper_backing_device_info{backing_device="sdl",device="dm-5"} 1
+# HELP node_disk_device_mapper_info Info about disk device mapper.
+# TYPE node_disk_device_mapper_info gauge
+node_disk_device_mapper_info{device="dm-0",lv_layer="",lv_name="",name="nvme0n1_crypt",uuid="CRYPT-LUKS2-jolaulot80fy9zsiobkxyxo7y2dqeho2-nvme0n1_crypt",vg_name=""} 1
+node_disk_device_mapper_info{device="dm-1",lv_layer="",lv_name="swap_1",name="system-swap_1",uuid="LVM-wbGqQEBL9SxrW2DLntJwgg8fAv946hw3Tvjqh0v31fWgxEtD4BoHO0lROWFUY65T",vg_name="system"} 1
+node_disk_device_mapper_info{device="dm-2",lv_layer="",lv_name="root",name="system-root",uuid="LVM-NWEDo8q5ABDyJuC3F8veKNyWfYmeIBfFMS4MF3HakzUhkk7ekDm6fJTHkl2fYHe7",vg_name="system"} 1
+node_disk_device_mapper_info{device="dm-3",lv_layer="",lv_name="var",name="system-var",uuid="LVM-hrxHo0rlZ6U95ku5841Lpd17bS1Z7V7lrtEE60DVgE6YEOCdS9gcDGyonWim4hGP",vg_name="system"} 1
+node_disk_device_mapper_info{device="dm-4",lv_layer="",lv_name="tmp",name="system-tmp",uuid="LVM-XTNGOHjPWLHcxmJmVu5cWTXEtuzqDeBkdEHAZW5q9LxWQ2d4mb5CchUQzUPJpl8H",vg_name="system"} 1
+node_disk_device_mapper_info{device="dm-5",lv_layer="",lv_name="home",name="system-home",uuid="LVM-MtoJaWTpjWRXlUnNFlpxZauTEuYlMvGFutigEzCCrfj8CNh6jCRi5LQJXZCpLjPf",vg_name="system"} 1
+# HELP node_disk_discard_time_seconds_total This is the total number of seconds spent by all discards.
 # TYPE node_disk_discard_time_seconds_total counter
 node_disk_discard_time_seconds_total{device="sdb"} 11.13
 node_disk_discard_time_seconds_total{device="sdc"} 11.13
@@ -66,6 +104,18 @@ node_disk_discards_completed_total{device="sdc"} 18851
 # TYPE node_disk_discards_merged_total counter
 node_disk_discards_merged_total{device="sdb"} 0
 node_disk_discards_merged_total{device="sdc"} 0
+# HELP node_disk_filesystem_info Info about disk filesystem.
+# TYPE node_disk_filesystem_info gauge
+node_disk_filesystem_info{device="dm-0",type="LVM2_member",usage="raid",uuid="c3C3uW-gD96-Yw69-c1CJ-5MwT-6ysM-mST0vB",version="LVM2 001"} 1
+node_disk_filesystem_info{device="dm-1",type="swap",usage="other",uuid="5272bb60-04b5-49cd-b730-be57c7604450",version="1"} 1
+node_disk_filesystem_info{device="dm-2",type="ext4",usage="filesystem",uuid="3deafd0d-faff-4695-8d15-51061ae1f51b",version="1.0"} 1
+node_disk_filesystem_info{device="dm-3",type="ext4",usage="filesystem",uuid="5c772222-f7d4-4c8e-87e8-e97df6b7a45e",version="1.0"} 1
+node_disk_filesystem_info{device="dm-4",type="ext4",usage="filesystem",uuid="a9479d44-60e1-4015-a1e5-bb065e6dd11b",version="1.0"} 1
+node_disk_filesystem_info{device="dm-5",type="ext4",usage="filesystem",uuid="b05b726a-c718-4c4d-8641-7c73a7696d83",version="1.0"} 1
+node_disk_filesystem_info{device="mmcblk0p1",type="vfat",usage="filesystem",uuid="6284-658D",version="FAT32"} 1
+node_disk_filesystem_info{device="mmcblk0p2",type="ext4",usage="filesystem",uuid="83324ce8-a6f3-4e35-ad64-dbb3d6b87a32",version="1.0"} 1
+node_disk_filesystem_info{device="sda",type="LVM2_member",usage="raid",uuid="cVVv6j-HSA2-IY33-1Jmj-dO2H-YL7w-b4Oxqw",version="LVM2 001"} 1
+node_disk_filesystem_info{device="sdc",type="LVM2_member",usage="raid",uuid="QFy9W7-Brj3-hQ6v-AF8i-3Zqg-n3Vs-kGY4vb",version="LVM2 001"} 1
 # HELP node_disk_flush_requests_time_seconds_total This is the total number of seconds spent by all flush requests.
 # TYPE node_disk_flush_requests_time_seconds_total counter
 node_disk_flush_requests_time_seconds_total{device="sdc"} 1.944
@@ -74,21 +124,21 @@ node_disk_flush_requests_time_seconds_total{device="sdc"} 1.944
 node_disk_flush_requests_total{device="sdc"} 1555
 # HELP node_disk_info Info of /sys/block/<block_device>.
 # TYPE node_disk_info gauge
-node_disk_info{device="dm-0",major="252",minor="0"} 1
-node_disk_info{device="dm-1",major="252",minor="1"} 1
-node_disk_info{device="dm-2",major="252",minor="2"} 1
-node_disk_info{device="dm-3",major="252",minor="3"} 1
-node_disk_info{device="dm-4",major="252",minor="4"} 1
-node_disk_info{device="dm-5",major="252",minor="5"} 1
-node_disk_info{device="mmcblk0",major="179",minor="0"} 1
-node_disk_info{device="mmcblk0p1",major="179",minor="1"} 1
-node_disk_info{device="mmcblk0p2",major="179",minor="2"} 1
-node_disk_info{device="nvme0n1",major="259",minor="0"} 1
-node_disk_info{device="sda",major="8",minor="0"} 1
-node_disk_info{device="sdb",major="8",minor="0"} 1
-node_disk_info{device="sdc",major="8",minor="0"} 1
-node_disk_info{device="sr0",major="11",minor="0"} 1
-node_disk_info{device="vda",major="254",minor="0"} 1
+node_disk_info{device="dm-0",major="252",minor="0",model="",path="",revision="",rotational="0",serial="",wwn=""} 1
+node_disk_info{device="dm-1",major="252",minor="1",model="",path="",revision="",rotational="0",serial="",wwn=""} 1
+node_disk_info{device="dm-2",major="252",minor="2",model="",path="",revision="",rotational="0",serial="",wwn=""} 1
+node_disk_info{device="dm-3",major="252",minor="3",model="",path="",revision="",rotational="0",serial="",wwn=""} 1
+node_disk_info{device="dm-4",major="252",minor="4",model="",path="",revision="",rotational="0",serial="",wwn=""} 1
+node_disk_info{device="dm-5",major="252",minor="5",model="",path="",revision="",rotational="0",serial="",wwn=""} 1
+node_disk_info{device="mmcblk0",major="179",minor="0",model="",path="platform-df2969f3.mmc",revision="",rotational="0",serial="0x83e36d93",wwn=""} 1
+node_disk_info{device="mmcblk0p1",major="179",minor="1",model="",path="platform-df2969f3.mmc",revision="",rotational="0",serial="0x83e36d93",wwn=""} 1
+node_disk_info{device="mmcblk0p2",major="179",minor="2",model="",path="platform-df2969f3.mmc",revision="",rotational="0",serial="0x83e36d93",wwn=""} 1
+node_disk_info{device="nvme0n1",major="259",minor="0",model="SAMSUNG EHFTF55LURSY-000Y9",path="pci-0000:02:00.0-nvme-1",revision="4NBTUY95",rotational="0",serial="S252B6CU1HG3M1",wwn="eui.p3vbbiejx5aae2r3"} 1
+node_disk_info{device="sda",major="8",minor="0",model="TOSHIBA_KSDB4U86",path="pci-0000:3b:00.0-sas-phy7-lun-0",revision="0102",rotational="1",serial="2160A0D5FVGG",wwn="0x7c72382b8de36a64"} 1
+node_disk_info{device="sdb",major="8",minor="16",model="SuperMicro_SSD",path="pci-0000:00:1f.2-ata-1",revision="0R",rotational="0",serial="SMC0E1B87ABBB16BD84E",wwn="0xe1b87abbb16bd84e"} 1
+node_disk_info{device="sdc",major="8",minor="32",model="INTEL_SSDS9X9SI0",path="pci-0000:00:1f.2-ata-4",revision="0100",rotational="0",serial="3EWB5Y25CWQWA7EH1U",wwn="0x58907ddc573a5de"} 1
+node_disk_info{device="sr0",major="11",minor="0",model="Virtual_CDROM0",path="pci-0000:00:14.0-usb-0:1.1:1.0-scsi-0:0:0:0",revision="1.00",rotational="0",serial="AAAABBBBCCCC1",wwn=""} 1
+node_disk_info{device="vda",major="254",minor="0",model="",path="pci-0000:00:06.0",revision="",rotational="0",serial="",wwn=""} 1
 # HELP node_disk_io_now The number of I/Os currently in progress.
 # TYPE node_disk_io_now gauge
 node_disk_io_now{device="dm-0"} 0
@@ -278,10 +328,10 @@ node_disk_written_bytes_total{device="sr0"} 0
 node_disk_written_bytes_total{device="vda"} 1.0938236928e+11
 `
 
-	logger := log.NewLogfmtLogger(os.Stderr)
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	collector, err := NewDiskstatsCollector(logger)
 	if err != nil {
-		panic(err)
+		t.Fatal(err)
 	}
 	c, err := NewTestDiskStatsCollector(logger)
 	if err != nil {
@@ -302,5 +352,77 @@ node_disk_written_bytes_total{device="vda"} 1.0938236928e+11
 	err = testutil.GatherAndCompare(reg, strings.NewReader(testcase))
 	if err != nil {
 		t.Fatal(err)
+	}
+}
+
+// TestRotationalLabel verifies that rotationalLabel returns the correct string
+// value from the sysfs file via blockdevice.FS.SysBlockDeviceRotational,
+// fails closed to "0" for missing files, and returns "0" when the file does
+// not exist (preserving backward compatibility with the previous
+// SysBlockDeviceQueueStats zero-value behaviour, issue #3282).
+func TestRotationalLabel(t *testing.T) {
+	fs, err := blockdevice.NewFS("fixtures/proc", "fixtures/sys/diskstats")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cases := []struct {
+		dev      string
+		expected string
+		desc     string
+	}{
+		{
+			dev:      "sda",
+			expected: "1",
+			desc:     "rotational HDD: file contains '1'",
+		},
+		{
+			dev:      "sdb",
+			expected: "0",
+			desc:     "non-rotational SSD: file contains '0'",
+		},
+		{
+			dev:      "nonexistent_device_xyz",
+			expected: "0",
+			desc:     "missing rotational file: defaults to '0' for backward compat",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.dev, func(t *testing.T) {
+			got := rotationalLabel(fs, tc.dev)
+			if got != tc.expected {
+				t.Errorf("rotationalLabel(%q): got %q, want %q (%s)",
+					tc.dev, got, tc.expected, tc.desc)
+			}
+		})
+	}
+}
+
+// BenchmarkDiskstatsUpdate measures the full Update() call so that future PRs
+// introducing per-device sysfs I/O regressions are detectable before merge.
+// Run with: go test -bench=BenchmarkDiskstatsUpdate -benchtime=5s ./collector/
+func BenchmarkDiskstatsUpdate(b *testing.B) {
+	*sysPath = "fixtures/sys"
+	*procPath = "fixtures/proc"
+	*udevDataPath = "fixtures/udev/data"
+	*diskstatsDeviceExclude = "^(z?ram|loop|fd|(h|s|v|xv)d[a-z]|nvme\\d+n\\d+p)\\d+$"
+
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	collector, err := NewDiskstatsCollector(logger)
+	if err != nil {
+		b.Fatal(err)
+	}
+
+	b.ResetTimer()
+	for b.Loop() {
+		ch := make(chan prometheus.Metric, 512)
+		if err := collector.Update(ch); err != nil {
+			b.Fatal(err)
+		}
+		// Drain channel so goroutine doesn't block.
+		for len(ch) > 0 {
+			<-ch
+		}
 	}
 }

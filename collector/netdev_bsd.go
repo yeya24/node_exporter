@@ -11,16 +11,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// +build !nonetdev
-// +build freebsd dragonfly
+//go:build !nonetdev && (freebsd || dragonfly)
 
 package collector
 
 import (
 	"errors"
-
-	"github.com/go-kit/log"
-	"github.com/go-kit/log/level"
+	"log/slog"
 )
 
 /*
@@ -33,7 +30,7 @@ import (
 */
 import "C"
 
-func getNetDevStats(filter *netDevFilter, logger log.Logger) (netDevStats, error) {
+func getNetDevStats(filter *deviceFilter, logger *slog.Logger) (netDevStats, error) {
 	netDev := netDevStats{}
 
 	var ifap, ifa *C.struct_ifaddrs
@@ -49,7 +46,7 @@ func getNetDevStats(filter *netDevFilter, logger log.Logger) (netDevStats, error
 
 		dev := C.GoString(ifa.ifa_name)
 		if filter.ignored(dev) {
-			level.Debug(logger).Log("msg", "Ignoring device", "device", dev)
+			logger.Debug("Ignoring device", "device", dev)
 			continue
 		}
 
@@ -58,16 +55,20 @@ func getNetDevStats(filter *netDevFilter, logger log.Logger) (netDevStats, error
 		netDev[dev] = map[string]uint64{
 			"receive_packets":    uint64(data.ifi_ipackets),
 			"transmit_packets":   uint64(data.ifi_opackets),
-			"receive_errs":       uint64(data.ifi_ierrors),
-			"transmit_errs":      uint64(data.ifi_oerrors),
 			"receive_bytes":      uint64(data.ifi_ibytes),
 			"transmit_bytes":     uint64(data.ifi_obytes),
+			"receive_errors":     uint64(data.ifi_ierrors),
+			"transmit_errors":    uint64(data.ifi_oerrors),
+			"receive_dropped":    uint64(data.ifi_iqdrops),
+			"transmit_dropped":   uint64(data.ifi_oqdrops),
 			"receive_multicast":  uint64(data.ifi_imcasts),
 			"transmit_multicast": uint64(data.ifi_omcasts),
-			"receive_drop":       uint64(data.ifi_iqdrops),
-			"transmit_drop":      uint64(data.ifi_oqdrops),
 		}
 	}
 
 	return netDev, nil
+}
+
+func getNetDevLabels() (map[string]map[string]string, error) {
+	return nil, nil
 }

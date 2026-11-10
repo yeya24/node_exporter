@@ -11,16 +11,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// +build !noprocesses
+//go:build !noprocesses
 
 package collector
 
 import (
+	"io"
+	"log/slog"
 	"testing"
 
-	"github.com/go-kit/log"
+	"github.com/alecthomas/kingpin/v2"
 	"github.com/prometheus/procfs"
-	kingpin "gopkg.in/alecthomas/kingpin.v2"
 )
 
 func TestReadProcessStatus(t *testing.T) {
@@ -32,8 +33,8 @@ func TestReadProcessStatus(t *testing.T) {
 	if err != nil {
 		t.Errorf("failed to open procfs: %v", err)
 	}
-	c := processCollector{fs: fs, logger: log.NewNopLogger()}
-	pids, states, threads, err := c.getAllocatedThreads()
+	c := processCollector{fs: fs, logger: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	pids, states, threads, _, err := c.getAllocatedThreads()
 	if err != nil {
 		t.Fatalf("Cannot retrieve data from procfs getAllocatedThreads function: %v ", err)
 	}
@@ -41,12 +42,11 @@ func TestReadProcessStatus(t *testing.T) {
 		t.Fatalf("Current threads: %d Shouldn't be less than wanted %d", threads, want)
 	}
 	if states == nil {
-
 		t.Fatalf("Process states cannot be nil %v:", states)
 	}
 	maxPid, err := readUintFromFile(procFilePath("sys/kernel/pid_max"))
 	if err != nil {
-		t.Fatalf("Unable to retrieve limit number of maximum pids alloved %v\n", err)
+		t.Fatalf("Unable to retrieve limit number of maximum pids allowed %v\n", err)
 	}
 	if uint64(pids) > maxPid || pids == 0 {
 		t.Fatalf("Total running pids cannot be greater than %d or equals to 0", maxPid)
